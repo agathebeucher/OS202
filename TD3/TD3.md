@@ -7,6 +7,6 @@ On implémente la méthode tel que :
 - il crée une liste de buckets vide et associe à chacun un iterval
 - il répartie les éléments du tableau de départ dans les buckets en fonction de sa valeur et l'appartenance dans l'interval
 - il les dispatch aux autres process (fonction *SCATTER*),
-- **Chaque process participe au tri en parallèle (fonction *SORT*)**,
+- **Chaque process participe au tri en parallèle** (fonction *SORT*),
 - le tableau trié est rassemblé sur le process 0 (fonction *GATHER*),
 - il modifie la liste de buckets en une seule liste triée !
