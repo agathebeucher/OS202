@@ -277,16 +277,29 @@ if __name__ == "__main__":
     if rank == size - 1:
         my_ants_count += remainder_ants
 
-    # Calcul les indices de départ/fin des fourmis dans chaque process
-    my_ants_start = (rank - 1) * ants_per_process 
-    if rank == size - 1:
-        my_ants_start = (rank - 1) * ants_per_process + remainder_ants
-    my_ants_end = my_ants_start + my_ants_count
-    my_ants_indices = np.arange(my_ants_start, my_ants_end) # Tableau d'indice de fourmi
-    
+    if rank==0:
+        # Initialisation de la colonie globale
+        ants_global=Colony(nb_ants, pos_nest, max_life,rank)
+        ants_historic_glob_list=np.zeros((nb_ants, max_life+1, 2), dtype=np.int16)
+        ants_directions_glob_list=d.DIR_NONE*np.ones(nb_ants, dtype=np.int8)
+        ants_age_glob_list=np.zeros(nb_ants, dtype=np.int64)
+        # Initialisation de la colonie locale vide
+        ants_local=Colony(my_ants_count, pos_nest, max_life,rank)
+        ants_local.historic_path=None
+        ants_local.directions=None
+        ants_local.age=None
+
+        unloaded_ants = np.array(range(nb_ants))
+        
+        
     if rank!=0:
-        # Création de la colonie
+        # Création des colonies locales
         ants_local = Colony(my_ants_count, pos_nest, max_life,rank)
+        ants_historic_glob_list=None
+        ants_directions_glob_list=None
+        ants_age_glob_list=None
+
+        unloaded_ants = np.array(range(my_ants_count))
 
     while True:
         # Fermeture de la fenêtre
@@ -298,57 +311,35 @@ if __name__ == "__main__":
         # Sur le processus d'affichage
         if rank == 0:
             deb = time.time()
-            
             # Affichage du labyrinthe
             maze_img = a_maze.display()
 
-            # Initialisation des classes locales
-            ants_global=Colony(nb_ants, pos_nest, max_life,rank)
-            ants_historic_glob_list=np.zeros((nb_ants, max_life+1, 2), dtype=np.int16)
-            ants_directions_glob_list=np.zeros((nb_ants, max_life+1, 2), dtype=np.int16)
-            ants_age_glob_list=np.zeros(nb_ants, dtype=np.int64)
-            ants_loaded_glob_list=np.zeros(nb_ants, dtype=np.int8)
-            ants_seeds_glob_list=np.mod(16807*ants_global.seeds[:], 2147483647)
-            ants_local=Colony(nb_ants, pos_nest, max_life,rank)
-            ants_local.historic_path=None
-            ants_local.directions=None
-            ants_local.age=None
-            ants_local.is_loaded=None
-            ants_local.seeds=None
-
+        # Sur les processus de calcul
         else:
             deb = None
             # fait avancer les fourmis dans chaque process : 
             old_pheromone=pherom.pheromon.copy()
             food_counter = ants_local.advance(a_maze, pos_food, pos_nest, pherom)
-            ants_historic_glob_list=None
-            ants_directions_glob_list=None
-            ants_age_glob_list=None
-            ants_loaded_glob_list=None
-            ants_seeds_glob_list=None
+            
             pherom_updates_local=pherom.pheromon
             unloaded_ants = np.array(range(nb_ants))
         
         # Agrégation des food_counter et homogénisation de la variable 
-        food_counter = comm.allreduce(food_counter, op=MPI.SUM)
-        comm.allreduce(pherom_updates_local, pherom_update_global, op=MPI.SUM)
-        pherom.pheromon += pherom_update_global
+        food_counter=comm.allreduce(food_counter, op=MPI.SUM)
+        pherom_update_global=comm.gather(pherom_updates_local, root=0)
 
         ants_historic_glob_list=comm.gather(ants_local.historic_path,root=0)
         ants_directions_glob_list=comm.gather(ants_local.directions,root=0)
         ants_age_glob_list=comm.gather(ants_local.age,root=0)
-        ants_loaded_glob_list=comm.gather(ants_local.is_loaded,root=0)
-        ants_seeds_glob_list=comm.gather(ants_local.seeds,root=0)
-        
-        
 
         if rank==0:
             #Concaténation de chaque elem de ants reçu
             ants_global.historic_path = np.concatenate([arr for arr in ants_historic_glob_list if arr is not None])
             ants_global.directions= np.concatenate([arr for arr in ants_directions_glob_list if arr is not None])
-            ants_global.age = np.concatenate([arr for arr in ants_age_glob_list if arr is not None])
-            ants_global.is_loaded = np.concatenate([arr for arr in ants_loaded_glob_list if arr is not None])
-            ants_global.seeds=np.concatenate([arr for arr in ants_seeds_glob_list if arr is not None])
+            ants_global.age= np.concatenate([arr for arr in ants_age_glob_list if arr is not None])
+            pherom_update_global = [update for update in pherom_update_global if update is not None]
+            pherom_update_global = np.amax(pherom_update_global, axis=0)
+            pherom.pheromon = np.maximum(pherom.pheromon, pherom_update_global)
             if food_counter == 1 and not snapshop_taken:
                 pg.image.save(screen, "ressources/MyFirstFood_ref.png")
                 snapshop_taken = True
@@ -361,6 +352,6 @@ if __name__ == "__main__":
             pg.display.update()
             end = time.time()
             print(f"FPS : {1. / (end - deb):6.2f}, nourriture : {food_counter:7d}", end='\r')
-            pherom.do_evaporation(pos_food)
+        pherom.do_evaporation(pos_food)
         unloaded_ants = np.array(range(nb_ants))
             
