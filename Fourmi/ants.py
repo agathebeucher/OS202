@@ -22,7 +22,7 @@ class Colony:
     """
     def __init__(self, nb_ants, pos_init, max_life,rank):
         # Each ant has is own unique random seed
-        self.seeds = np.arange(1, nb_ants+1, dtype=np.int64)
+        self.seeds = np.arange(rank*nb_ants, rank*nb_ants+nb_ants, dtype=np.int64)
         # State of each ant : loaded or unloaded
         self.is_loaded = np.zeros(nb_ants, dtype=np.int8)
         # Compute the maximal life amount for each ant :
@@ -68,7 +68,7 @@ class Colony:
                 food_counter += in_nest_loc.shape[0]
         return food_counter
 
-    def explore(self, unloaded_ants, the_maze, pos_food, pos_nest, pheromones):
+    def explore(self, unloaded_ants, the_maze, pos_food, pos_nest, old_pheromone):
         """
         Management of unloaded ants exploring the maze.
 
@@ -85,32 +85,33 @@ class Colony:
         # Update of the random seed (for manual pseudo-random) applied to all unloaded ants
         self.seeds[unloaded_ants] = np.mod(16807*self.seeds[unloaded_ants], 2147483647)
 
-        # Calculating possible exits for each ant in the maze:
+        # Calcule des sorties possible en tenant compte des murs du labyrinthe
         old_pos_ants = self.historic_path[range(0, self.seeds.shape[0]), self.age[:], :]
         has_north_exit = np.bitwise_and(the_maze.maze[old_pos_ants[:, 0], old_pos_ants[:, 1]], maze.NORTH) > 0
         has_east_exit = np.bitwise_and(the_maze.maze[old_pos_ants[:, 0], old_pos_ants[:, 1]], maze.EAST) > 0
         has_south_exit = np.bitwise_and(the_maze.maze[old_pos_ants[:, 0], old_pos_ants[:, 1]], maze.SOUTH) > 0
         has_west_exit = np.bitwise_and(the_maze.maze[old_pos_ants[:, 0], old_pos_ants[:, 1]], maze.WEST) > 0
 
-        # Reading neighboring pheromones:
+        # lecture des phéromones voisins
         north_pos = np.copy(old_pos_ants)
         north_pos[:, 1] += 1
-        north_pheromone = pheromones.pheromon[north_pos[:, 0], north_pos[:, 1]]*has_north_exit
+        north_pheromone = old_pheromone[north_pos[:, 0], north_pos[:, 1]]*has_north_exit
 
         east_pos = np.copy(old_pos_ants)
         east_pos[:, 0] += 1
         east_pos[:, 1] += 2
-        east_pheromone = pheromones.pheromon[east_pos[:, 0], east_pos[:, 1]]*has_east_exit
+        east_pheromone = old_pheromone[east_pos[:, 0], east_pos[:, 1]]*has_east_exit
 
         south_pos = np.copy(old_pos_ants)
         south_pos[:, 0] += 2
         south_pos[:, 1] += 1
-        south_pheromone = pheromones.pheromon[south_pos[:, 0], south_pos[:, 1]]*has_south_exit
+        south_pheromone = old_pheromone[south_pos[:, 0], south_pos[:, 1]]*has_south_exit
 
         west_pos = np.copy(old_pos_ants)
         west_pos[:, 0] += 1
-        west_pheromone = pheromones.pheromon[west_pos[:, 0], west_pos[:, 1]]*has_west_exit
+        west_pheromone = old_pheromone[west_pos[:, 0], west_pos[:, 1]]*has_west_exit
 
+        # Détermination de la direction avec la concentration maximale de phéromones 
         max_pheromones = np.maximum(north_pheromone, east_pheromone)
         max_pheromones = np.maximum(max_pheromones, south_pheromone)
         max_pheromones = np.maximum(max_pheromones, west_pheromone)
@@ -190,13 +191,13 @@ class Colony:
             ants_at_food = unloaded_ants[ants_at_food_loc]
             self.is_loaded[ants_at_food] = True
 
-    def advance(self, the_maze, pos_food, pos_nest, pheromones, food_counter=0):
+    def advance(self, the_maze, pos_food, pos_nest, pherom, food_counter=0):
         loaded_ants = np.nonzero(self.is_loaded == True)[0]
         unloaded_ants = np.nonzero(self.is_loaded == False)[0]
         if loaded_ants.shape[0] > 0:
             food_counter = self.return_to_nest(loaded_ants, pos_nest, food_counter)
         if unloaded_ants.shape[0] > 0:
-            self.explore(unloaded_ants, the_maze, pos_food, pos_nest, pheromones)
+            self.explore(unloaded_ants, the_maze, pos_food, pos_nest, old_pheromone)
 
         old_pos_ants = self.historic_path[range(0, self.seeds.shape[0]), self.age[:], :]
         has_north_exit = np.bitwise_and(the_maze.maze[old_pos_ants[:, 0], old_pos_ants[:, 1]], maze.NORTH) > 0
@@ -204,7 +205,7 @@ class Colony:
         has_south_exit = np.bitwise_and(the_maze.maze[old_pos_ants[:, 0], old_pos_ants[:, 1]], maze.SOUTH) > 0
         has_west_exit = np.bitwise_and(the_maze.maze[old_pos_ants[:, 0], old_pos_ants[:, 1]], maze.WEST) > 0
         # Marking pheromones:
-        [pheromones.mark(self.historic_path[i, self.age[i], :],
+        [pherom.mark(self.historic_path[i, self.age[i], :],
                          [has_north_exit[i], has_east_exit[i], has_west_exit[i], has_south_exit[i]],old_pheromone) for i in range(self.directions.shape[0])]
         return food_counter
 
@@ -239,6 +240,12 @@ if __name__ == "__main__":
 
     # Calcul nb total de fourmis en fonctions de la taille du labyrinthe
     nb_ants = size_laby[0] * size_laby[1] // 4
+    #nb_ants=3
+    # Calcul du nb de fourmis par processeur
+    my_ants_count = nb_ants // (size - 1)
+    remainder_ants = nb_ants % (size - 1)
+    if rank == size - 1: # Ajoute le reste des fourmis non réparties uniformément au dernier processus
+            my_ants_count += remainder_ants
 
     # Durée max de vie des fourmis
     max_life = 500
@@ -256,49 +263,30 @@ if __name__ == "__main__":
         alpha = float(sys.argv[4])
     if len(sys.argv) > 5:
         beta = float(sys.argv[5])
-    pherom_local = pheromone.Pheromon(size_laby, pos_food, alpha, beta)
-
+    
     # Initialisation labyrinthe et phéromones
     a_maze = maze.Maze(size_laby, 12345,rank)
     pherom = pheromone.Pheromon(size_laby, pos_food, alpha, beta)
-    
-    pherom_updates_local = np.zeros_like(pherom_local.pheromon)
-    pherom_update_global=np.zeros_like(pherom_updates_local)
+
+    pherom_updates_local = np.zeros_like(pherom.pheromon)
 
     food_counter = 0 # compteur de nourriture
     snapshop_taken = False # drapeau
 
-    # Calcul du nb de fourmis par processeur
-    ants_per_process = nb_ants // (size - 1)
-    remainder_ants = nb_ants % (size - 1) # Fourmis restantes
-    my_ants_count = ants_per_process
-
-    # Ajoute le reste des fourmis non réparties uniformément au dernier processus
-    if rank == size - 1:
-        my_ants_count += remainder_ants
-
     if rank==0:
+        
         # Initialisation de la colonie globale
         ants_global=Colony(nb_ants, pos_nest, max_life,rank)
-        ants_historic_glob_list=np.zeros((nb_ants, max_life+1, 2), dtype=np.int16)
-        ants_directions_glob_list=d.DIR_NONE*np.ones(nb_ants, dtype=np.int8)
-        ants_age_glob_list=np.zeros(nb_ants, dtype=np.int64)
+
         # Initialisation de la colonie locale vide
         ants_local=Colony(my_ants_count, pos_nest, max_life,rank)
         ants_local.historic_path=None
         ants_local.directions=None
         ants_local.age=None
-
-        unloaded_ants = np.array(range(nb_ants))
         
-        
-    if rank!=0:
+    else:
         # Création des colonies locales
         ants_local = Colony(my_ants_count, pos_nest, max_life,rank)
-        ants_historic_glob_list=None
-        ants_directions_glob_list=None
-        ants_age_glob_list=None
-
         unloaded_ants = np.array(range(my_ants_count))
 
     while True:
@@ -315,43 +303,40 @@ if __name__ == "__main__":
             maze_img = a_maze.display()
 
         # Sur les processus de calcul
-        else:
+        else:  
             deb = None
             # fait avancer les fourmis dans chaque process : 
             old_pheromone=pherom.pheromon.copy()
             food_counter = ants_local.advance(a_maze, pos_food, pos_nest, pherom)
-            
+            time.sleep(0.1)
             pherom_updates_local=pherom.pheromon
-            unloaded_ants = np.array(range(nb_ants))
         
         # Agrégation des food_counter et homogénisation de la variable 
         food_counter=comm.allreduce(food_counter, op=MPI.SUM)
         pherom_update_global=comm.gather(pherom_updates_local, root=0)
-
-        ants_historic_glob_list=comm.gather(ants_local.historic_path,root=0)
-        ants_directions_glob_list=comm.gather(ants_local.directions,root=0)
-        ants_age_glob_list=comm.gather(ants_local.age,root=0)
+        all_historic=comm.gather(ants_local.historic_path,root=0)
+        all_directions=comm.gather(ants_local.directions,root=0)
+        all_age=comm.gather(ants_local.age,root=0)
 
         if rank==0:
             #Concaténation de chaque elem de ants reçu
-            ants_global.historic_path = np.concatenate([arr for arr in ants_historic_glob_list if arr is not None])
-            ants_global.directions= np.concatenate([arr for arr in ants_directions_glob_list if arr is not None])
-            ants_global.age= np.concatenate([arr for arr in ants_age_glob_list if arr is not None])
-            pherom_update_global = [update for update in pherom_update_global if update is not None]
+            ants_global.historic_path = np.concatenate([np.array(arr) for arr in all_historic if arr is not None],axis=0)
+            ants_global.directions= np.concatenate([np.array(arr) for arr in all_directions if arr is not None])
+            ants_global.age= np.concatenate([np.array(arr) for arr in all_age if arr is not None])
+            pherom_update_global = [np.array(update) for update in pherom_update_global if update is not None]
             pherom_update_global = np.amax(pherom_update_global, axis=0)
-            pherom.pheromon = np.maximum(pherom.pheromon, pherom_update_global)
+            #pherom.pheromon = np.maximum(pherom.pheromon, pherom_update_global)
+            pherom.pheromon = pherom_update_global
+            pherom.do_evaporation(pos_food)
             if food_counter == 1 and not snapshop_taken:
                 pg.image.save(screen, "ressources/MyFirstFood_ref.png")
                 snapshop_taken = True
-
+            
             #Affichage des phéromones/fourmis
             pherom.display(screen)
             screen.blit(maze_img, (0, 0))
             ants_global.display(screen)
-            print(rank,food_counter)
             pg.display.update()
             end = time.time()
             print(f"FPS : {1. / (end - deb):6.2f}, nourriture : {food_counter:7d}", end='\r')
-        pherom.do_evaporation(pos_food)
-        unloaded_ants = np.array(range(nb_ants))
-            
+        pherom.pheromon = comm.bcast(pherom.pheromon, root=0)
