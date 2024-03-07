@@ -3,7 +3,7 @@ Module managing an ant colony in a labyrinth.
 """
 import numpy as np
 import maze_sequentiel
-import pheromone
+import pheromone_sequentiel
 import direction as d
 import pygame as pg
 
@@ -41,7 +41,7 @@ class Colony:
         # Direction in which the ant is currently facing (depends on the direction it came from).
         self.directions = d.DIR_NONE*np.ones(nb_ants, dtype=np.int8)
         self.sprites = []
-        img = pg.image.load("/home/beucher/OS202/Fourmi2024/ressources/ants.png").convert_alpha()
+        img = pg.image.load("ressources/ants.png").convert_alpha()
         for i in range(0, 32, 8):
             self.sprites.append(pg.Surface.subsurface(img, i, 0, 8, 8))
 
@@ -237,7 +237,7 @@ if __name__ == "__main__":
         alpha = float(sys.argv[4])
     if len(sys.argv) > 5:
         beta = float(sys.argv[5])
-    pherom = pheromone.Pheromon(size_laby, pos_food, alpha, beta)
+    pherom = pheromone_sequentiel.Pheromon(size_laby, pos_food, alpha, beta)
     mazeImg = a_maze.display()
     food_counter = 0
     
@@ -253,13 +253,14 @@ if __name__ == "__main__":
         pherom.display(screen)
         screen.blit(mazeImg, (0, 0))
         ants.display(screen)
+        
         pg.display.update()
                 
         food_counter = ants.advance(a_maze, pos_food, pos_nest, pherom, food_counter)
         pherom.do_evaporation(pos_food)
         end = time.time()
         if food_counter == 1 and not snapshop_taken:
-            pg.image.save(screen, "/home/beucher/OS202/Fourmi2024/ressources/MyFirstFood.png")
+            pg.image.save(screen, "ressources/MyFirstFood.png")
             snapshop_taken = True
         # pg.time.wait(500)
-        print(f"FPS : {1./(end-deb):6.2f}, nourriture : {food_counter:7d}", end='\r')
+        print(f"FPS : {1./(end-deb):6.2f}, nourriture : {food_counter:7d}")

@@ -278,7 +278,6 @@ if __name__ == "__main__":
             old_pheromone=pherom.pheromon.copy()
             # Mise à jour de la colonie locale
             food_counter = ants_local.advance(a_maze, pos_food, pos_nest, pherom, old_pheromone)
-            time.sleep(0.075)
             pherom.do_evaporation(pos_food)
             pherom_updates_local=pherom.pheromon 
 
@@ -305,4 +304,4 @@ if __name__ == "__main__":
             ants_global.display(screen)
             pg.display.update()
             end = time.time()
-            print(f"FPS : {1. / (end - deb):6.2f}, nourriture : {food_counter:7d}", end='\r')
+            print(f"FPS : {1. / (end - deb):6.2f}, nourriture : {food_counter:7d}")
