@@ -218,75 +218,69 @@ if __name__ == "__main__":
     comm = MPI.COMM_WORLD
     size = comm.Get_size()
     rank = comm.Get_rank()
-
+    
+    # Initialisation des paramètres du jeu
     pg.init()
-
-    # Initialisation des variables globales
     size_laby = 25, 25
     max_life = 500
-    
-    beta = 0.99
     if len(sys.argv) > 2:
         size_laby = int(sys.argv[1]),int(sys.argv[2])
-    
-    
     if len(sys.argv) > 3:
         max_life = int(sys.argv[3])
-    
-    alpha = 0.9
-    if len(sys.argv) > 4:
-        alpha = float(sys.argv[4])
-    
-
-    if len(sys.argv) > 5:
-        beta = float(sys.argv[5])
-
     resolution = size_laby[1]*8, size_laby[0]*8
     nb_ants = size_laby[0]*size_laby[1] // 4
     pos_food = size_laby[0]-1, size_laby[1]-1
     pos_nest = 0, 0
+    beta = 0.99
+    alpha = 0.9
+    if len(sys.argv) > 4:
+        alpha = float(sys.argv[4])
+    if len(sys.argv) > 5:
+        beta = float(sys.argv[5])
     food_counter = 0
 
+    # Affichage de l'interface graphique seulement sur le processeur 0
     if rank==0:
         screen = pg.display.set_mode(resolution)
-
-    # Initialisation de la colonie pour chaque processus
-    ants_per_process = nb_ants//(size-1)
-    if rank==size-1:
-        ants_per_process = ants_per_process+(nb_ants%(size-1))
-    local_ants = Colony(ants_per_process, pos_nest, max_life,rank)
-
-    # Initialisation du labyrinthe pour chaque processus
+    
+    # Initialisation du labyrinthe/phéromone global
     a_maze = maze.Maze(size_laby, 12345, rank)
     pherom = pheromone.Pheromon(size_laby, pos_food, alpha, beta)
 
-    # Définition de la global_colony qui rassemblera les données calculées sur les différents processeurs.
+    # Répartition des fourmis par processus
+    ants_per_process = nb_ants//(size-1)
+    if rank==size-1:
+            ants_per_process = ants_per_process+(nb_ants%(size-1))# répartition des fourmis restantes
+
+    # Initialisation d'une colonie locale dans chaque processus non nul
+    local_ants = Colony(ants_per_process, pos_nest, max_life,rank)
+
+    # Initialisation d'une colonie globale pour le moment insignifiante
     if rank==0:
         global_ants = local_ants
 
     snapshop_taken = False
     while True:
+        # Cas de fermeture de fenêtre
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit()
+                exit(0)
         if rank==0:
-            for event in pg.event.get():
-                if event.type == pg.QUIT:
-                    pg.quit()
-                    exit(0)
-
-        # Initialisation des tableaux de récéption de données
-        if rank==0 :
+            deb = time.time()
+            # Initialisation des tableaux de récéption des données send initilalement vide
             all_directions = np.zeros(0, dtype=np.int8)
             all_age = np.zeros(0, dtype=np.int64)
             all_historic_path = np.zeros((nb_ants,max_life+1,2), dtype=np.int16)
 
         if rank != 0:
-
+            # Copie de la version globale précédente des phéromones
             old_pheromone=pherom.pheromon.copy()
-            # On calcule les nouvelles données liées à la nouvelle itération.
+            # Mise à jour de la colonie locale
             food_counter = local_ants.advance(a_maze, pos_food, pos_nest, pherom, old_pheromone, food_counter)
-            time.sleep(0.1)
+            #time.sleep(0.1)
             pherom.do_evaporation(pos_food)
-
-            # Envoie au process 0
+            # Envoie des données nécéssaires à l'affichage à P0
             comm.send(local_ants.age, dest=0, tag=0)
             comm.send(local_ants.historic_path, dest=0, tag=1)
             comm.send(local_ants.directions,dest=0, tag=2)
@@ -294,41 +288,34 @@ if __name__ == "__main__":
             comm.send(pherom.pheromon,dest=0,tag=4)
 
         if rank == 0:
-            deb = time.time()
             food_counter = 0
-
             for process in range(1, size):
+                # Pour chaque processeur, reception des données d'intêret
                 age=comm.recv(source=process, tag=0)
                 historic_path=comm.recv(source=process, tag=1)
                 directions=comm.recv(source=process, tag=2)
                 food_counter += comm.recv(source=process, tag=3)
                 pherom_local = comm.recv(source=process, tag=4)
-                nb_ants_recv=historic_path.shape[0]
-
-                #Agrégation des résultats reçus en tableau NUMpy
-                all_age = np.concatenate((all_age,age))
-                all_directions = np.concatenate((all_directions,directions))
+                # Agrégation des résultats reçus en tableau NUMPY
+                all_age = np.concatenate((all_age,age),axis=0)
+                all_directions = np.concatenate((all_directions,directions), axis=0)
                 all_historic_path[(process-1)*ants_per_process:process*ants_per_process,:,:] = historic_path
                 pherom.pheromon=np.array(pherom_local)            
 
-            # Mise à jour des données globales après avoir récupéré les données de chaque processus.
+            # Mise à jour de la colonie globale avec les données locales récupérées
             global_ants.age = all_age
             global_ants.historic_path = all_historic_path
             global_ants.directions = all_directions
 
-            # Après avoir synchronisé toutes les instances des colonies locales, le processeur 0 peut afficher les fourmis.
+            # Affichage fourmi/phéromones
             a_maze_img = a_maze.display()
             pherom.display(screen)
             screen.blit(a_maze_img, (0, 0))
             global_ants.display(screen)
             pg.display.update()
-
             end = time.time()
-
-            # Sauvegarde de l'image une fois que la nourriture est collectée pour la première fois
             if food_counter == 1 and not snapshop_taken:
                 pg.image.save(screen, "ressources/MyFirstFood.png")
                 snapshop_taken = True
-
-            print(f"FPS : {1./(end-deb):6.2f}, nourriture : {food_counter:7d}", end='\r')
+            print(f"FPS : {1./(end-deb):6.2f}, nourriture : {food_counter:7d}")
         
