@@ -25,7 +25,7 @@ class Colony:
     """
     def __init__(self, nb_ants, pos_init, max_life,rank):
         # Each ant has is own unique random seed
-        self.seeds = np.arange(rank*nb_ants, rank*nb_ants+nb_ants, dtype=np.int64)
+        self.seeds = np.arange(1, nb_ants+1, dtype=np.int64)
         # State of each ant : loaded or unloaded
         self.is_loaded = np.zeros(nb_ants, dtype=np.int8)
         # Compute the maximal life amount for each ant :
@@ -195,7 +195,7 @@ class Colony:
             ants_at_food = unloaded_ants[ants_at_food_loc]
             self.is_loaded[ants_at_food] = True
 
-    def advance(self, the_maze, pos_food, pos_nest, pherom, food_counter=0):
+    def advance(self, the_maze, pos_food, pos_nest, pherom, old_pheromone,food_counter=0):
         loaded_ants = np.nonzero(self.is_loaded == True)[0]
         unloaded_ants = np.nonzero(self.is_loaded == False)[0]
         if loaded_ants.shape[0] > 0:
@@ -217,62 +217,50 @@ class Colony:
         [screen.blit(self.sprites[self.directions[i]], (8*self.historic_path[i, self.age[i], 1], 8*self.historic_path[i, self.age[i], 0])) for i in range(self.directions.shape[0])]
 
 if __name__ == "__main__":
-    
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     size = comm.Get_size()
-
-    # Initialisation du jeu
+    
+    # Initialisation des paramètres du jeu
     pg.init()
-    size_laby = 25, 25 # taille du labyrinthe par défaut
-    if len(sys.argv) > 2: # taille du labyrinthe par commande terminal
-        size_laby = int(sys.argv[1]), int(sys.argv[2])
-    resolution = size_laby[1] * 8, size_laby[0] * 8 # résolution de l'écran en fonction de la taille du labyrinthe
-
-    # Affichage de l'écran 
-    if rank==0:
-        screen = pg.display.set_mode(resolution)
-
-    # Calcul nb total de fourmis en fonctions de la taille du labyrinthe
-    nb_ants = size_laby[0] * size_laby[1] // 4
-    #nb_ants=3
-    # Calcul du nb de fourmis par processeur
-    my_ants_count = nb_ants // (size - 1)
-    remainder_ants = nb_ants % (size - 1)
-    if rank == size - 1: # Ajoute le reste des fourmis non réparties uniformément au dernier processus
-        my_ants_count += remainder_ants
-    if rank == 0 : 
-        my_ants_counts=0
-
-    # Durée max de vie des fourmis
+    size_laby = 25, 25
     max_life = 500
+    if len(sys.argv) > 2:
+        size_laby = int(sys.argv[1]),int(sys.argv[2])
     if len(sys.argv) > 3:
         max_life = int(sys.argv[3])
-
-    # Position nourriture/nid dans le labyrinthe
-    pos_food = size_laby[0] - 1, size_laby[1] - 1
+    resolution = size_laby[1]*8, size_laby[0]*8
+    nb_ants = size_laby[0]*size_laby[1] // 4
+    pos_food = size_laby[0]-1, size_laby[1]-1
     pos_nest = 0, 0
-
-    # Paramètre phéromones
-    alpha = 0.9
     beta = 0.99
+    alpha = 0.9
     if len(sys.argv) > 4:
         alpha = float(sys.argv[4])
     if len(sys.argv) > 5:
         beta = float(sys.argv[5])
+    food_counter = 0
+
+    # Affichage de l'interface graphique seulement sur le processeur 0
+    if rank==0:
+        screen = pg.display.set_mode(resolution)
     
-    # Initialisation labyrinthe et phéromones
-    a_maze = maze.Maze(size_laby, 12345,rank)
+    # Initialisation du labyrinthe/phéromone global
+    a_maze = maze.Maze(size_laby, 12345, rank)
     pherom = pheromone.Pheromon(size_laby, pos_food, alpha, beta)
 
-    food_counter = 0 # compteur de nourriture
-    snapshop_taken = False # drapeau
-    ants_local=Colony(my_ants_count, pos_nest, max_life,rank)
+    # Répartition des fourmis par processus
+    ants_per_process = nb_ants//(size-1)
+    if rank==size-1:
+            ants_per_process = ants_per_process+(nb_ants%(size-1))# répartition des fourmis restantes
+
+    # Initialisation d'une colonie locale dans chaque processus non nul
+    ants_local = Colony(ants_per_process, pos_nest, max_life,rank)
 
     if rank==0:
         # Initialisation de la colonie globale
-        ants_global=ants_local
+        ants_global=Colony(nb_ants, pos_nest, max_life,rank)
 
     while True:
         # Fermeture de la fenêtre
@@ -280,22 +268,20 @@ if __name__ == "__main__":
             if event.type == pg.QUIT:
                 pg.quit()
                 exit(0)
-
+        pherom_updates_local=None
         # Sur le processus d'affichage
         if rank == 0:
             deb = time.time()
-            # Affichage du labyrinthe
-            maze_img = a_maze.display()
-            food_counter=0
         # Sur les processus de calcul
-        else:  
-            deb = None
-            # fait avancer les fourmis dans chaque process : 
+        else:
+            # Copie de la version globale précédente des phéromones
             old_pheromone=pherom.pheromon.copy()
-            food_counter = ants_local.advance(a_maze, pos_food, pos_nest, pherom)
+            # Mise à jour de la colonie locale
+            food_counter = ants_local.advance(a_maze, pos_food, pos_nest, pherom, old_pheromone)
+            time.sleep(0.075)
             pherom.do_evaporation(pos_food)
-            #time.sleep(0.1)
             pherom_updates_local=pherom.pheromon 
+
         food_counter=comm.allreduce(food_counter, op=MPI.SUM)
         pherom_update_global=comm.gather(pherom_updates_local, root=0)
         all_historic=comm.gather(ants_local.historic_path,root=0)
@@ -303,33 +289,20 @@ if __name__ == "__main__":
         all_age=comm.gather(ants_local.age,root=0)
 
         if rank==0:
-            # Nombre de fourmis dont on a actuellement reçues les données, utile pour historic path.
-            current_nb_ants = 0
-            # Recevoir les données mises à jour des colonies locales depuis les autres processeurs
-            all_historic=np.zeros((nb_ants,max_life+1,2), dtype=np.int16)
-            all_directions=np.zeros(0, dtype=np.int8)
-            all_age=np.zeros(0, dtype=np.int64)
-            food_counter=0
-  
-            pherom_update_global.append(info_received['pherom_updates_local'])
-            #Concaténation de chaque elem de ants reçu
+            # Concaténation de chaque elem de ants reçu
             ants_global.historic_path = np.concatenate([arr for arr in all_historic if arr is not None],axis=0)
             ants_global.directions= np.concatenate([arr for arr in all_directions if arr is not None])
-            ants_global.age= np.concatenate([arr for arr in all_age if arr is not None])"""
-            #pherom_update_global = [update for update in pherom_update_global if update is not None]
-            #pherom_update_global = np.amax(pherom_update_global, axis=0)
-            #pherom.pheromon = np.maximum(pherom.pheromon, pherom_update_global)
-            #pherom.pheromon = pherom_updates_local
-
-            if food_counter == 1 and not snapshop_taken:
-                pg.image.save(screen, "ressources/MyFirstFood_ref.png")
-                snapshop_taken = True
+            ants_global.age= np.concatenate([arr for arr in all_age if arr is not None])
+            pherom_update_global = [update for update in pherom_update_global if update is not None]
+            pherom_update_global = np.amax(pherom_update_global, axis=0)
+            pherom.pheromon = np.maximum(pherom.pheromon, pherom_update_global)
+            pherom.pheromon = pherom_update_global
             
             #Affichage des phéromones/fourmis
+            a_maze_img = a_maze.display()
             pherom.display(screen)
-            screen.blit(maze_img, (0, 0))
+            screen.blit(a_maze_img, (0, 0))
             ants_global.display(screen)
             pg.display.update()
             end = time.time()
             print(f"FPS : {1. / (end - deb):6.2f}, nourriture : {food_counter:7d}", end='\r')
-        #pherom.pheromon = comm.bcast(pherom.pheromon, root=0)
