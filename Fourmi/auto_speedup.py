@@ -61,7 +61,7 @@ for nb_proc in nb_procs:
         times_parallel_gather.append(1 / average_fps_par_gather)
 
     # Exécute le programme parallèle send
-    cmd_par_send = f'mpiexec -n {nb_proc} python3 ants_send.py'  # Assurez-vous que ants_send.py est le nom correct
+    cmd_par_send = f'mpiexec -n {nb_proc} python3 ants_send.py' 
     print(nb_proc,"send")
     average_fps_par_send = execute_command_and_collect_data(cmd_par_send,max_data_count)
     if average_fps_par_send:
