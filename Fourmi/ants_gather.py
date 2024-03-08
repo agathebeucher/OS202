@@ -253,7 +253,8 @@ if __name__ == "__main__":
     # Répartition des fourmis par processus
     ants_per_process = nb_ants//(size-1)
     if rank==size-1:
-            ants_per_process = ants_per_process+(nb_ants%(size-1))# répartition des fourmis restantes
+            ants_per_process = ants_per_process+(nb_ants%(size-1))
+            # répartition des fourmis restantes
 
     # Initialisation d'une colonie locale dans chaque processus non nul
     ants_local = Colony(ants_per_process, pos_nest, max_life,rank)
@@ -262,7 +263,9 @@ if __name__ == "__main__":
         # Initialisation de la colonie globale
         ants_global=Colony(nb_ants, pos_nest, max_life,rank)
 
+    start=time.time()
     while True:
+    #while True:
         # Fermeture de la fenêtre
         for event in pg.event.get():
             if event.type == pg.QUIT:
@@ -272,6 +275,7 @@ if __name__ == "__main__":
         # Sur le processus d'affichage
         if rank == 0:
             deb = time.time()
+        
         # Sur les processus de calcul
         else:
             # Copie de la version globale précédente des phéromones
@@ -281,6 +285,7 @@ if __name__ == "__main__":
             pherom.do_evaporation(pos_food)
             pherom_updates_local=pherom.pheromon 
 
+        # Regroupement des résultats reçus en tableau NUMPY
         food_counter=comm.allreduce(food_counter, op=MPI.SUM)
         pherom_update_global=comm.gather(pherom_updates_local, root=0)
         all_historic=comm.gather(ants_local.historic_path,root=0)
@@ -292,6 +297,7 @@ if __name__ == "__main__":
             ants_global.historic_path = np.concatenate([arr for arr in all_historic if arr is not None],axis=0)
             ants_global.directions= np.concatenate([arr for arr in all_directions if arr is not None])
             ants_global.age= np.concatenate([arr for arr in all_age if arr is not None])
+
             pherom_update_global = [update for update in pherom_update_global if update is not None]
             pherom_update_global = np.amax(pherom_update_global, axis=0)
             pherom.pheromon = np.maximum(pherom.pheromon, pherom_update_global)
@@ -303,5 +309,9 @@ if __name__ == "__main__":
             screen.blit(a_maze_img, (0, 0))
             ants_global.display(screen)
             pg.display.update()
+
+            
             end = time.time()
             print(f"FPS : {1. / (end - deb):6.2f}, nourriture : {food_counter:7d}")
+    pg.quit()
+    exit(0)

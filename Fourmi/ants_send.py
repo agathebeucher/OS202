@@ -260,6 +260,8 @@ if __name__ == "__main__":
         global_ants = local_ants
 
     snapshop_taken = False
+    #while True:
+    start=time.time()
     while True:
         # Cas de fermeture de fenêtre
         for event in pg.event.get():
@@ -318,4 +320,6 @@ if __name__ == "__main__":
                 pg.image.save(screen, "ressources/MyFirstFood.png")
                 snapshop_taken = True
             print(f"FPS : {1./(end-deb):6.2f}, nourriture : {food_counter:7d}")
+    pg.quit()
+    exit(0)
         
